@@ -1,0 +1,7 @@
+openai
+httpx
+tree_sitter
+tree_sitter_python
+tree_sitter_javascript
+tree_sitter_go
+tree_sitter_c

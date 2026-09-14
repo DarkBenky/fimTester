@@ -21,6 +21,10 @@ def load_config(path):
     if not isinstance(data, list) or not data:
         raise ConfigError("config must be a non-empty JSON array")
     models = [validate_model(entry, i) for i, entry in enumerate(data)]
+    names = [m.name for m in models]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise ConfigError(f"duplicate model names: {', '.join(duplicates)}")
     return models
 
 
@@ -57,8 +61,8 @@ def validate_model(entry, index):
     temperature = entry.get("temperature", 0)
     if not isinstance(temperature, (int, float)):
         errors.append("temperature: must be a number")
-    timeout = entry.get("timeout", 60)
-    if not isinstance(timeout, (int, float)) or timeout <= 0:
+    timeout = entry.get("timeout")
+    if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
         errors.append("timeout: must be a positive number")
     headers = entry.get("headers", {})
     if not isinstance(headers, dict):

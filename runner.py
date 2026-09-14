@@ -118,12 +118,11 @@ async def run(args, models, holes, jsonl_path):
     done = 0
 
     async def job(model, mode, hole):
-        nonlocal done
         async with semaphore:
             provider = providers[model.name]
             budget = None
             if model.max_context_size is not None:
-                budget = model.max_context_size - model.max_tokens
+                budget = max(1, model.max_context_size - model.max_tokens)
             prefix, suffix, truncated = trim_context(hole.prefix, hole.suffix, budget)
             row = base_row(run_id, args.seed, model, mode, hole)
             row["context_truncated"] = truncated
@@ -139,13 +138,20 @@ async def run(args, models, holes, jsonl_path):
             except ProviderError as e:
                 row["status"] = "error"
                 row["error"] = f"{e.kind}: {e.message}"
-                row["attempts"] = 3
+                row["attempts"] = e.attempts
+                row["latency_ms"] = (time.perf_counter() - start) * 1000
+                return row
+            except Exception as e:
+                row["status"] = "error"
+                row["error"] = f"unexpected {type(e).__name__}: {e}"
+                row["attempts"] = 1
                 row["latency_ms"] = (time.perf_counter() - start) * 1000
                 return row
             row["latency_ms"] = (time.perf_counter() - start) * 1000
-            row["ttft_ms"] = result["ttft_ms"]
-            row["prompt_tokens"] = result["prompt_tokens"]
-            row["completion_tokens"] = result["completion_tokens"]
+            row["ttft_ms"] = result.get("ttft_ms")
+            row["prompt_tokens"] = result.get("prompt_tokens")
+            row["completion_tokens"] = result.get("completion_tokens")
+            row["attempts"] = result.get("attempts", 1)
             raw = result["text"]
             row["completion_raw"] = raw
             norm = postprocess(raw, hole.language, hole.indent)
@@ -161,7 +167,7 @@ async def run(args, models, holes, jsonl_path):
             row["syntax_valid_merged"] = merged
             row["cost_usd"] = cost_usd(
                 model.model, row["prompt_tokens"], row["completion_tokens"],
-                model.pricing, result["live_cost"],
+                model.pricing, result.get("live_cost"),
             )
             return row
 
@@ -170,14 +176,21 @@ async def run(args, models, holes, jsonl_path):
         for mode in ("fim", "chat"):
             for hole in holes:
                 tasks.append(asyncio.create_task(job(model, mode, hole)))
-    with open(jsonl_path, "w", encoding="utf-8") as f:
-        for coro in asyncio.as_completed(tasks):
-            row = await coro
-            rows.append(row)
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-            f.flush()
-            done += 1
-            print(f"[{done}/{total}] {row['model']} {row['mode']} {row['file']} -> {row['status']}")
-    for provider in providers.values():
-        await provider.close()
+    try:
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            for coro in asyncio.as_completed(tasks):
+                row = await coro
+                rows.append(row)
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                f.flush()
+                done += 1
+                print(f"[{done}/{total}] {row['model']} {row['mode']} {row['file']} -> {row['status']}")
+    finally:
+        for task in tasks:
+            task.cancel()
+        for provider in providers.values():
+            try:
+                await provider.close()
+            except Exception:
+                pass
     return rows

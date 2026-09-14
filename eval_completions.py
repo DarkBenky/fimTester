@@ -3,7 +3,7 @@ import asyncio
 import sys
 
 from config import ConfigError, load_config
-from report import per_file, summarize, write_csv, write_jsonl
+from report import PER_FILE_FIELDS, SUMMARY_FIELDS, per_file, summarize, write_csv, write_jsonl
 from runner import build_holes, load_samples, rebuild_holes, run, write_samples
 
 
@@ -32,11 +32,18 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv)
     languages = [l.strip().lower() for l in args.languages.split(",") if l.strip()]
+    if args.span_lines[0] > args.span_lines[1]:
+        print("span-lines MIN must be <= MAX", file=sys.stderr)
+        return 2
     try:
         models = load_config(args.config)
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 2
+    for model in models:
+        if model.timeout is None:
+            model.timeout = args.timeout
+
     if args.samples_file:
         samples = load_samples(args.samples_file)
         holes = rebuild_holes(samples)
@@ -52,15 +59,8 @@ def main(argv=None):
         return 1
     rows = asyncio.run(run(args, models, holes, args.jsonl))
     write_jsonl(args.jsonl, rows)
-    write_csv(args.csv, summarize(rows), ["model", "mode", "samples", "ok", "unsupported", "errors",
-                                          "error_rate", "exact_match", "exact_match_norm",
-                                          "avg_similarity_char", "avg_similarity_token",
-                                          "syntax_valid", "avg_latency_ms", "median_latency_ms",
-                                          "p95_latency_ms", "avg_ttft_ms", "total_prompt_tokens",
-                                          "total_completion_tokens", "total_cost_usd"])
-    write_csv(args.per_file_csv, per_file(rows), ["model", "mode", "file", "language", "samples",
-                                                  "exact_match", "avg_similarity_char",
-                                                  "syntax_valid", "errors", "cost_usd"])
+    write_csv(args.csv, summarize(rows), SUMMARY_FIELDS)
+    write_csv(args.per_file_csv, per_file(rows), PER_FILE_FIELDS)
     print(f"wrote {len(rows)} rows to {args.jsonl}, {args.csv}, {args.per_file_csv}")
     return 0
 

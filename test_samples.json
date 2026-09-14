@@ -4,6 +4,8 @@
     "language": "c",
     "start_line": 13,
     "end_line": 21,
+    "start_byte": 224,
+    "end_byte": 453,
     "cut": "block",
     "removed_text": "int filter_min(const int *values, size_t count, int min, int *out) {\n    size_t n = 0;\n    for (size_t i = 0; i < count; i++) {\n        if (values[i] > min) {\n            out[n++] = values[i];\n        }\n    }\n    return (int)n;\n}"
   },
@@ -12,6 +14,8 @@
     "language": "go",
     "start_line": 4,
     "end_line": 5,
+    "start_byte": 23,
+    "end_byte": 35,
     "cut": "lines",
     "removed_text": "\t\"fmt\"\n\t\"os\""
   },
@@ -20,6 +24,8 @@
     "language": "python",
     "start_line": 5,
     "end_line": 13,
+    "start_byte": 23,
+    "end_byte": 265,
     "cut": "block",
     "removed_text": "def process_data(items, threshold):\n    results = []\n    total = 0\n    for item in items:\n        value = item.get(\"value\", 0)\n        if value > threshold:\n            results.append(item)\n            total += value\n    return results, total"
   },
@@ -28,6 +34,8 @@
     "language": "javascript",
     "start_line": 10,
     "end_line": 27,
+    "start_byte": 133,
+    "end_byte": 419,
     "cut": "lines",
     "removed_text": "\nfunction filterMin(values, min) {\n  const out = [];\n  for (const v of values) {\n    if (v > min) {\n      out.push(v);\n    }\n  }\n  return out;\n}\n\nfunction greet(name) {\n  return `hello ${name}`;\n}\n\nfunction main() {\n  const name = process.argv[2] || 'world';\n  console.log(greet(name));"
   }

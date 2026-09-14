@@ -45,7 +45,8 @@ EDGE_LINES = 3
 
 
 class Hole:
-    def __init__(self, file, language, start_line, end_line, cut, removed_text, prefix, suffix, indent):
+    def __init__(self, file, language, start_line, end_line, cut, removed_text, prefix, suffix, indent,
+                 start_byte=None, end_byte=None):
         self.file = file
         self.language = language
         self.start_line = start_line
@@ -55,6 +56,8 @@ class Hole:
         self.prefix = prefix
         self.suffix = suffix
         self.indent = indent
+        self.start_byte = start_byte
+        self.end_byte = end_byte
 
     def to_sample(self):
         return {
@@ -62,6 +65,8 @@ class Hole:
             "language": self.language,
             "start_line": self.start_line,
             "end_line": self.end_line,
+            "start_byte": self.start_byte,
+            "end_byte": self.end_byte,
             "cut": self.cut,
             "removed_text": self.removed_text,
         }
@@ -110,10 +115,10 @@ def make_hole(rng, language, text, min_file_lines, span_min, span_max, cut):
         hole = make_block_hole(rng, language, text, lines, n)
         if hole is not None:
             return hole
-    return make_line_hole(rng, lines, n, span_min, span_max)
+    return make_line_hole(rng, lines, n, span_min, span_max, language)
 
 
-def make_line_hole(rng, lines, n, span_min, span_max):
+def make_line_hole(rng, lines, n, span_min, span_max, language):
     lo, hi = EDGE_LINES, n - 1 - EDGE_LINES
     if hi - lo < 1:
         return None
@@ -122,7 +127,7 @@ def make_line_hole(rng, lines, n, span_min, span_max):
     start = rng.randint(lo, hi - length)
     end = start + length
     removed = "\n".join(lines[start:end])
-    if not is_meaningful(removed, "python"):
+    if not is_meaningful(removed, language):
         return None
     prefix = "\n".join(lines[:start]) + "\n"
     suffix = "\n".join(lines[end:])
@@ -131,6 +136,8 @@ def make_line_hole(rng, lines, n, span_min, span_max):
         start_line=start + 1, end_line=end,
         cut="lines", removed_text=removed,
         prefix=prefix, suffix=suffix, indent=indent_of(removed),
+        start_byte=sum(len(l) + 1 for l in lines[:start]),
+        end_byte=sum(len(l) + 1 for l in lines[:end]) - 1,
     )
 
 
@@ -151,6 +158,7 @@ def make_block_hole(rng, language, text, lines, n):
             start_line=node.start_point[0] + 1, end_line=node.end_point[0] + 1,
             cut="block", removed_text=removed,
             prefix=prefix, suffix=suffix, indent=indent_of(removed),
+            start_byte=node.start_byte, end_byte=node.end_byte,
         )
     return None
 
@@ -179,6 +187,8 @@ def indent_of(text):
 def trim_context(prefix, suffix, budget_tokens):
     if budget_tokens is None:
         return prefix, suffix, False
+    if budget_tokens <= 0:
+        budget_tokens = 1
     budget_chars = budget_tokens * 4
     if len(prefix) + len(suffix) <= budget_chars:
         return prefix, suffix, False
@@ -194,21 +204,32 @@ def trim_context(prefix, suffix, budget_tokens):
 
 
 def hole_from_sample(sample, text):
-    lines = text.split("\n")
-    start = sample["start_line"] - 1
-    end = sample["end_line"]
-    if sample["cut"] == "lines":
-        prefix = "\n".join(lines[:start]) + "\n"
-        suffix = "\n".join(lines[end:])
-    else:
-        start_byte = sum(len(l) + 1 for l in lines[:start])
-        end_byte = sum(len(l) + 1 for l in lines[:end]) - 1
-        prefix = text[:start_byte]
-        suffix = text[end_byte:]
-    removed = sample["removed_text"]
+    start_byte = sample.get("start_byte")
+    end_byte = sample.get("end_byte")
+    if start_byte is None or end_byte is None:
+        lines = text.split("\n")
+        start = sample["start_line"] - 1
+        end = sample["end_line"]
+        if sample["cut"] == "block":
+            start_byte = sum(len(l) + 1 for l in lines[:start])
+        else:
+            start_byte = sum(len(l) + 1 for l in lines[:start])
+            end_byte = sum(len(l) + 1 for l in lines[:end]) - 1
+        if end_byte is None:
+            end_byte = start_byte + len(sample["removed_text"].encode("utf-8"))
+    removed = text[start_byte:end_byte]
+    if removed != sample["removed_text"]:
+        start_line = sample["start_line"]
+        raise ValueError(
+            f"sample no longer matches file {sample['file']}: "
+            f"removed_text differs at {start_line} (file changed since sampling or bad offsets)"
+        )
+    prefix = text[:start_byte]
+    suffix = text[end_byte:]
     return Hole(
         file=sample["file"], language=sample["language"],
         start_line=sample["start_line"], end_line=sample["end_line"],
         cut=sample["cut"], removed_text=removed,
         prefix=prefix, suffix=suffix, indent=indent_of(removed),
+        start_byte=start_byte, end_byte=end_byte,
     )

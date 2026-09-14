@@ -35,15 +35,24 @@ def strip_fences(text):
 
 
 def reindent(text, indent):
-    pad = " " * indent
-    lines = text.split("\n")
+    nonblank = [line for line in text.split("\n") if line.strip()]
+    if not nonblank:
+        return text
+    base = min(len(line) - len(line.lstrip(" ")) for line in nonblank)
+    delta = indent - base
     out = []
-    for line in lines:
+    for line in text.split("\n"):
         if not line.strip():
             out.append("")
         else:
-            out.append(pad + line.lstrip(" "))
+            current = len(line) - len(line.lstrip(" "))
+            shifted = max(0, current + delta)
+            out.append(" " * shifted + line.lstrip(" "))
     return "\n".join(out)
+
+
+def estimate_tokens(text):
+    return max(1, (len(text) + 3) // 4)
 
 
 def postprocess(completion, language, indent):
@@ -70,12 +79,7 @@ def _parser(language):
 
 
 def _has_error(node):
-    if node.has_error:
-        return True
-    for child in node.children:
-        if _has_error(child):
-            return True
-    return False
+    return node.has_error
 
 
 def syntax_valid(language, text):

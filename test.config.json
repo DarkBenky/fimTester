@@ -2,8 +2,8 @@
   {
     "name": "local-qwen30b",
     "model": "local",
-    "endpoint": "http://localhost:8012/v1/chat/completions",
-    "fim_endpoint": "http://localhost:8012/infill",
+    "endpoint": "http://localhost:8013/v1/chat/completions",
+    "fim_endpoint": "http://localhost:8013/infill",
     "fim_protocol": "llamacpp_infill",
     "api_key_env": null,
     "max_context_size": 16000,
@@ -18,7 +18,7 @@
   {
     "name": "local-chat-only",
     "model": "local",
-    "endpoint": "http://localhost:8012/v1/chat/completions",
+    "endpoint": "http://localhost:8013/v1/chat/completions",
     "api_key_env": null,
     "max_context_size": 16000,
     "max_tokens": 1024,

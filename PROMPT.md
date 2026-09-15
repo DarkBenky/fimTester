@@ -7,14 +7,18 @@ CLI:
     -seed 42 -jsonl results.jsonl -csv summary.csv -per-file-csv per_file.csv
     -workers 4 -timeout 60 -span-lines 1 20 -cut mixed|lines|block
     -min-file-lines 30 -languages c,go,python,javascript
+    -sampling balanced|random
     -write-samples samples.json -samples-file samples.json -no-stream
+    -fresh
 
   - every flag also works with two dashes (-path / --path)
   - defaults: seed 42, jsonl results.jsonl, csv summary.csv, per-file-csv per_file.csv, workers 4, timeout 60, cut mixed, span-lines 1 20, min-file-lines 30, languages = all four
+  - results accumulate: a run appends its rows to the existing -jsonl and the summaries are recomputed over all rows from every previous run, so repeated runs average together; -fresh overwrites instead
 
 Core:
   - recursively collect source files (skip .git, node_modules, vendor, build, dist, target, hidden dirs)
   - split -samples into balanced per-language quotas across the languages present; redistribute leftover quota to languages that still have usable files
+  - or -sampling random: pick -samples files uniformly at random from the whole repo, no language balancing
   - pick holes with one seeded RNG (same seed = same holes); prefer a distinct file per hole, repeat a file only when the quota exceeds the number of usable files
   - remove a middle span, keep prefix + suffix, trim context to the model's max_context_size
   - every model completes the same holes in both modes (fim + chat)
@@ -86,6 +90,8 @@ Config:
   - api_key_env: name of the env var holding the key (preferred); api_key: literal value, $NAME also resolves to an env var; null for local endpoints
   - max_context_size: token budget for prefix + suffix
   - max_tokens (default 256; DeepSeek FIM caps it at 4096), temperature (default 0), timeout seconds (default 60)
+  - modes: subset of [fim, chat] to run for this model (default both); disabled modes are skipped entirely, no rows
+  - device_type: optional label of the physical device shared by local servers (e.g. cpu, gpu); models with the same device_type keep at most one request in flight in total across all of them, models without it are unrestricted
   - headers: extra HTTP headers (OpenRouter etc.)
   - pricing: {input: usd_per_mtok, output: usd_per_mtok} overrides the built-in price table
   - api keys are never logged and never written to the result files
@@ -196,6 +202,7 @@ Files (each module owns one job; the entry file only calls into them):
   - metrics.py: normalization, similarity, tree-sitter syntax checks
   - pricing.py: price table + cost calculation
   - report.py: JSONL/CSV writers and summary aggregation
+  - judge.py: post-run LLM judge (python judge.py -results results.jsonl -config judge.config.json) - scores each ok completion 0-10 with notes via a cheap judge model (e.g. z-ai/glm-5.3-flash:floor), writes results_judged.jsonl and summary_judged.csv (override with -csv); -reuse carries over scores from the previous results_judged.jsonl and only judges rows that have none yet
   - runner.py: job building, async orchestration, samples.json read/write
 
 STYLE GUIDE:

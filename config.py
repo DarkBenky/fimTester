@@ -70,6 +70,14 @@ def validate_model(entry, index):
     extra_body = entry.get("extra_body", {})
     if not isinstance(extra_body, dict):
         errors.append("extra_body: must be an object")
+    modes = entry.get("modes", ["fim", "chat"])
+    if (not isinstance(modes, list) or not modes
+            or any(m not in ("fim", "chat") for m in modes)
+            or len(set(modes)) != len(modes)):
+        errors.append("modes: must be a non-empty list of unique fim/chat")
+    device_type = entry.get("device_type")
+    if device_type is not None and (not isinstance(device_type, str) or not device_type.strip()):
+        errors.append("device_type: must be a non-empty string")
     pricing = entry.get("pricing")
     if pricing is not None:
         if not isinstance(pricing, dict) or not all(
@@ -98,7 +106,9 @@ def validate_model(entry, index):
         timeout=timeout,
         headers=headers,
         extra_body=extra_body,
+        modes=modes,
         pricing=pricing,
+        device_type=device_type.strip() if device_type else None,
     )
 
 
@@ -120,7 +130,7 @@ def resolve_key(key, key_env):
 class ModelConfig:
     def __init__(self, name, model, endpoint, fim_endpoint, fim_protocol, fim_template,
                  api_key, max_context_size, max_tokens, temperature, timeout, headers,
-                 extra_body, pricing):
+                 extra_body, modes, pricing, device_type):
         self.name = name
         self.model = model
         self.endpoint = endpoint
@@ -134,7 +144,9 @@ class ModelConfig:
         self.timeout = timeout
         self.headers = headers
         self.extra_body = extra_body
+        self.modes = modes
         self.pricing = pricing
+        self.device_type = device_type
 
     def has_fim(self):
         return self.fim_endpoint is not None

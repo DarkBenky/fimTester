@@ -1,2 +1,12 @@
 config.json
+judge.config.json
+.env
 __pycache__/
+cpu_servers/
+results.jsonl
+results_judged.jsonl
+summary.csv
+summary_judged.csv
+per_file.csv
+debug_*.csv
+debug_*.jsonl

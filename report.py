@@ -1,6 +1,7 @@
 import csv
 import json
 import statistics
+import sys
 
 JSONL_FIELDS = [
     "run_id", "timestamp", "seed", "model", "mode", "file", "language",
@@ -9,6 +10,7 @@ JSONL_FIELDS = [
     "latency_ms", "ttft_ms", "cost_usd", "exact_match_raw", "exact_match_norm",
     "similarity_char", "similarity_token", "syntax_valid_fragment",
     "syntax_valid_merged", "status", "error", "attempts",
+    "judge_score", "judge_notes",
 ]
 
 SUMMARY_FIELDS = [
@@ -16,6 +18,7 @@ SUMMARY_FIELDS = [
     "exact_match", "exact_match_norm", "avg_similarity_char", "avg_similarity_token",
     "syntax_valid", "avg_latency_ms", "median_latency_ms", "p95_latency_ms",
     "avg_ttft_ms", "total_prompt_tokens", "total_completion_tokens", "total_cost_usd",
+    "avg_judge_score",
 ]
 
 PER_FILE_FIELDS = [
@@ -28,6 +31,20 @@ def write_jsonl(path, rows):
     with open(path, "w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def read_jsonl(path):
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for number, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                print(f"warning: skipping corrupt line {number} in {path}", file=sys.stderr)
+    return rows
 
 
 def _mean(values):
@@ -54,6 +71,7 @@ def summarize(rows):
         latencies = [r["latency_ms"] for r in ok if r["latency_ms"] is not None]
         ttfts = [r["ttft_ms"] for r in ok if r["ttft_ms"] is not None]
         costs = [r["cost_usd"] for r in ok if r["cost_usd"] is not None]
+        judge = [r["judge_score"] for r in ok if r.get("judge_score") is not None]
         out.append({
             "model": model,
             "mode": mode,
@@ -74,6 +92,7 @@ def summarize(rows):
             "total_prompt_tokens": sum(r["prompt_tokens"] or 0 for r in ok),
             "total_completion_tokens": sum(r["completion_tokens"] or 0 for r in ok),
             "total_cost_usd": sum(costs) if costs else None,
+            "avg_judge_score": _mean(judge) if judge else None,
         })
     return out
 

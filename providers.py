@@ -239,5 +239,20 @@ class Provider:
             last_error = ProviderError("http", "request failed")
         raise last_error
 
+    async def raw_chat(self, messages, max_tokens=None):
+        kwargs = dict(
+            model=self.cfg.model,
+            messages=messages,
+            max_tokens=max_tokens or self.cfg.max_tokens,
+            temperature=0,
+        )
+        extra = self._extra_body(False)
+        if extra:
+            kwargs["extra_body"] = extra
+        response, _ = await self._with_retries(
+            lambda: self.client.chat.completions.create(**kwargs)
+        )
+        return response.choices[0].message.content or ""
+
     async def close(self):
         await self.client.close()

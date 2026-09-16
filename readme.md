@@ -1,9 +1,7 @@
-# Run the benchmark
-
-## TODO
-
+# TODOs
 - [ ] for each model test / check what fim format to use maybe test few samples for each model eval whitch is best then update config with fim fomat 
 
+## Run the benchmark
 ```bash
 python eval_completions.py -path ~/Desktop/gengin -samples 128 -config config.json -sampling random -workers 16 -seed 123
 ```

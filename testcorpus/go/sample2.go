@@ -2,36 +2,46 @@ package main
 
 import (
 	"fmt"
-	"os"
+	"sort"
 	"strings"
 )
 
-func sum(values []int) int {
-	total := 0
-	for _, v := range values {
-		total += v
-	}
-	return total
+type wordCount struct {
+	word  string
+	count int
 }
 
-func filter(values []int, min int) []int {
-	out := []int{}
-	for _, v := range values {
-		if v > min {
-			out = append(out, v)
+func countWords(text string) map[string]int {
+	counts := map[string]int{}
+	for _, word := range strings.Fields(strings.ToLower(text)) {
+		word = strings.Trim(word, ".,!?;:")
+		if word != "" {
+			counts[word]++
 		}
 	}
-	return out
+	return counts
+}
+
+func topWords(counts map[string]int, limit int) []wordCount {
+	ranked := make([]wordCount, 0, len(counts))
+	for word, count := range counts {
+		ranked = append(ranked, wordCount{word: word, count: count})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].count == ranked[j].count {
+			return ranked[i].word < ranked[j].word
+		}
+		return ranked[i].count > ranked[j].count
+	})
+	if limit < len(ranked) {
+		return ranked[:limit]
+	}
+	return ranked
 }
 
 func main() {
-	args := os.Args[1:]
-	name := "world"
-	if len(args) > 0 {
-		name = args[0]
+	text := "the quick brown fox jumps over the lazy dog the fox"
+	for _, entry := range topWords(countWords(text), 3) {
+		fmt.Printf("%s: %d\n", entry.word, entry.count)
 	}
-	fmt.Println("hello", name)
-	nums := []int{1, 2, 3, 4, 5, 6, 7, 8}
-	big := filter(nums, 4)
-	fmt.Println(sum(big))
 }

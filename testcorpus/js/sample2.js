@@ -1,33 +1,47 @@
-const fs = require('fs');
+const path = require('path');
 
-function sum(values) {
-  let total = 0;
-  for (const v of values) {
-    total += v;
+class TaskList {
+  constructor() {
+    this.tasks = [];
   }
-  return total;
-}
 
-function filterMin(values, min) {
-  const out = [];
-  for (const v of values) {
-    if (v > min) {
-      out.push(v);
+  add(title, priority = 0) {
+    this.tasks.push({ title, priority, done: false });
+    return this;
+  }
+
+  complete(title) {
+    const task = this.tasks.find((t) => t.title === title);
+    if (!task) {
+      throw new Error(`unknown task: ${title}`);
     }
+    task.done = true;
+    return task;
   }
-  return out;
+
+  pending() {
+    return this.tasks.filter((t) => !t.done);
+  }
+
+  byPriority() {
+    return [...this.tasks].sort((a, b) => b.priority - a.priority);
+  }
 }
 
-function greet(name) {
-  return `hello ${name}`;
+function summarize(tasks) {
+  const done = tasks.filter((t) => t.done).length;
+  return `${done}/${tasks.length} done`;
 }
 
 function main() {
-  const name = process.argv[2] || 'world';
-  console.log(greet(name));
-  const nums = [1, 2, 3, 4, 5, 6, 7, 8];
-  const big = filterMin(nums, 4);
-  console.log(sum(big));
+  const list = new TaskList();
+  list.add('write tests', 2).add('fix bug', 5).add('update docs', 1);
+  list.complete('fix bug');
+  for (const task of list.byPriority()) {
+    console.log(`${task.done ? '[x]' : '[ ]'} ${task.title}`);
+  }
+  console.log(summarize(list.tasks));
+  console.log('file:', path.basename(__filename));
 }
 
 main();

@@ -3,7 +3,7 @@ import asyncio
 import os
 import sys
 
-from config import ConfigError, load_config
+from config import ConfigError, active_models, load_config
 from report import PER_FILE_FIELDS, SUMMARY_FIELDS, per_file, read_jsonl, summarize, write_csv
 from runner import build_holes, load_samples, rebuild_holes, run, write_samples
 
@@ -40,9 +40,16 @@ def main(argv=None):
         print("span-lines MIN must be <= MAX", file=sys.stderr)
         return 2
     try:
-        models = load_config(args.config)
+        all_models = load_config(args.config)
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
+        return 2
+    models = active_models(all_models)
+    for model in all_models:
+        if not model.is_active():
+            print(f"deactivated, skipped: {model.name}")
+    if not models:
+        print("no active models in config", file=sys.stderr)
         return 2
     for model in models:
         if model.timeout is None:

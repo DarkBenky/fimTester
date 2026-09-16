@@ -179,6 +179,9 @@ class Provider:
             return await self._llamacpp_infill(prefix, suffix)
         else:
             raise ProviderError("config", f"unknown fim_protocol: {protocol}")
+        extra = self._extra_body(False)
+        if extra:
+            kwargs["extra_body"] = extra
         return await self._fim_openai(kwargs, path, stream)
 
     async def _fim_openai(self, kwargs, path, stream):
@@ -209,6 +212,7 @@ class Provider:
             "temperature": self.cfg.temperature,
             "cache_prompt": True,
         }
+        payload.update(self._extra_body(False))
         headers = dict(self.cfg.headers or {})
         if self.cfg.api_key:
             headers["Authorization"] = f"Bearer {self.cfg.api_key}"

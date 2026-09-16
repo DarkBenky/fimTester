@@ -1,5 +1,17 @@
 # TODOs
-- [ ] for each model test / check what fim format to use maybe test few samples for each model eval whitch is best then update config with fim fomat 
+- [x] for each model test / check what fim format to use maybe test few samples for each model eval whitch is best then update config with fim fomat 
+
+## Detect the FIM format per model
+
+```bash
+python detect_fim_format.py -config config.json -models cpu-starcoder2-3b -languages python -samples-per-format 2
+python detect_fim_format.py -config config.json -apply      # patch config.json (keeps config.json.bak)
+```
+
+Probes every model x candidate format on one shared hole set from `testcorpus`, writes
+`fim_format_results.jsonl` + `fim_format_summary.csv`, prints a ranked table per model with the
+winning `fim_protocol`/`fim_template` snippet. `-judge` re-scores the top formats with the judge
+model before picking winners; `-apply` patches config.json in place and skips anything unsafe.
 
 ## Run the benchmark
 ```bash

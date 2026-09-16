@@ -46,6 +46,8 @@ def judge_unscored(rows, config_path, workers):
     judges = load_config(config_path)
     if len(judges) != 1:
         raise ConfigError("judge config must contain exactly one model")
+    if not judges[0].is_active():
+        raise ConfigError("judge model is deactivated")
     targets = [r for r in rows if r["status"] == "ok" and r["judge_score"] is None]
     if not targets:
         return 0

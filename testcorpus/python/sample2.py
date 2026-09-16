@@ -1,33 +1,54 @@
-import os
-import sys
+import json
+from dataclasses import dataclass
 
 
-def process_data(items, threshold):
-    results = []
-    total = 0
-    for item in items:
-        value = item.get("value", 0)
-        if value > threshold:
-            results.append(item)
-            total += value
-    return results, total
+@dataclass
+class Item:
+    name: str
+    price: float
+    quantity: int = 0
+
+    def total(self):
+        return round(self.price * self.quantity, 2)
 
 
-def load_config(path):
-    if not os.path.exists(path):
-        raise FileNotFoundError(path)
-    with open(path) as handle:
-        return handle.read()
+class Inventory:
+    def __init__(self):
+        self.items = {}
+
+    def add(self, item):
+        self.items[item.name] = item
+        return item
+
+    def remove(self, name):
+        if name not in self.items:
+            raise KeyError(name)
+        return self.items.pop(name)
+
+    def value(self):
+        return round(sum(item.total() for item in self.items.values()), 2)
+
+    def low_stock(self, threshold):
+        return sorted(name for name, item in self.items.items() if item.quantity < threshold)
 
 
-def main(argv):
-    name = argv[1] if len(argv) > 1 else "world"
-    greeting = f"hello {name}"
-    print(greeting)
-    data = process_data([{"value": i} for i in range(10)], 4)
-    print(data)
-    return 0
+def load_inventory(path):
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    inventory = Inventory()
+    for entry in data:
+        inventory.add(Item(**entry))
+    return inventory
+
+
+def main():
+    inventory = Inventory()
+    inventory.add(Item("bolt", 0.25, 120))
+    inventory.add(Item("nut", 0.10, 8))
+    inventory.add(Item("washer", 0.05, 340))
+    print("value:", inventory.value())
+    print("low:", inventory.low_stock(50))
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    main()

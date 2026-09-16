@@ -110,6 +110,9 @@ def main(argv=None):
     if len(judges) != 1:
         print("judge config must contain exactly one model", file=sys.stderr)
         return 2
+    if not judges[0].is_active():
+        print("judge model is deactivated", file=sys.stderr)
+        return 2
     rows = read_jsonl(args.results)
     for row in rows:
         row.setdefault("judge_score", None)

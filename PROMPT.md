@@ -2,13 +2,32 @@ TODO: Build a Python code-completion/FIM evaluation harness.
 
 Goal: measure how well a model fills a removed middle span of real code, and compare models on the exact same holes.
 
-## Needs to be implemented: FIM Format Auto-Detection
+## FIM Format Auto-Detection
 
-Right now `fim_protocol`/`fim_template` in config.json have to be picked by hand per model. Add a
-`detect_fim_format.py` script that sends a small number of real FIM requests per model using
-several candidate prompt formats (StarCoder tags, CodeLlama tags, DeepSeek-Coder tokens, Qwen/
-OpenAI tags, native suffix-param protocol, llama.cpp infill), scores the completions, and reports
-(or applies) the best `fim_protocol`/`fim_template`/`fim_endpoint` per model.
+`detect_fim_format.py` sends a small number of real FIM requests per model using several candidate
+prompt formats (StarCoder tags, CodeLlama tags, DeepSeek-Coder tokens, Qwen/OpenAI tags, native
+suffix-param protocol, llama.cpp infill), scores the completions, and reports (or applies) the best
+`fim_protocol`/`fim_template`/`fim_endpoint` per model. The candidate table lives in `fim_formats.py`.
+
+CLI:
+  python detect_fim_format.py -config config.json
+    -path testcorpus -languages c,go,python,javascript -samples-per-format 3
+    -workers 4 -seed 42 -timeout 60 -max-tokens 192
+    -formats starcoder,codellama,deepseek_tokens,qwen_openai_tags,native_suffix_param,llamacpp_infill
+    -models name1,name2
+    -out-jsonl fim_format_results.jsonl -out-csv fim_format_summary.csv
+    -judge -judge-config judge.config.json
+    -apply
+
+  - one shared hole set is probed with every model x format pair; rows stream to the output file as they finish
+  - -max-tokens caps the probe completion length per model (useful on slow local servers)
+  - composite = 0.5 * token similarity + 0.3 * merged syntax + 0.2 * (0 when a template tag leaked into the completion)
+  - fim_format_results.jsonl rows: model, format, protocol, file, language, lines, removed_text,
+    completion_raw/norm, similarities, syntax flags, leaked, composite, status, error
+  - fim_format_summary.csv rows: model, format, requests, avg_similarity_char, avg_similarity_token,
+    syntax_valid_rate, leak_rate, composite_score
+  - -judge re-scores the contender formats per model (all within 0.10 composite of the best) with the judge\n    model (0.6 * judge/10 + 0.2 * syntax + 0.2 * no leak) and picks the winner among the judged formats
+  - -apply patches config.json in place (backup config.json.bak) and skips any model whose winner is not safe to apply
 
 Full implementation spec (self-contained, written for a model with no prior context on this
 repo): [FIM_FORMAT_DETECTION.md](FIM_FORMAT_DETECTION.md)
@@ -103,6 +122,7 @@ Config:
   - max_tokens (default 256; DeepSeek FIM caps it at 4096), temperature (default 0), timeout seconds (default 60)
   - modes: subset of [fim, chat] to run for this model (default both); disabled modes are skipped entirely, no rows
   - device_type: optional label of the physical device shared by local servers (e.g. cpu, gpu); models with the same device_type keep at most one request in flight in total across all of them, models without it are unrestricted
+  - deactivated: optional object (e.g. {"reason": "Too expensive"}); deactivated models are never requested - eval, detection and judge all skip them
   - headers: extra HTTP headers (OpenRouter etc.)
   - pricing: {input: usd_per_mtok, output: usd_per_mtok} overrides the built-in price table
   - api keys are never logged and never written to the result files
@@ -214,6 +234,8 @@ Files (each module owns one job; the entry file only calls into them):
   - pricing.py: price table + cost calculation
   - report.py: JSONL/CSV writers and summary aggregation
   - judge.py: post-run LLM judge (python judge.py -results results.jsonl -config judge.config.json) - scores each ok completion 0-10 with notes via a cheap judge model (e.g. z-ai/glm-5.3-flash:floor), writes results_judged.jsonl and summary_judged.csv (override with -csv); -reuse carries over scores from the previous results_judged.jsonl and only judges rows that have none yet
+  - fim_formats.py: candidate FIM prompt formats (tags/templates) + leak tokens
+  - detect_fim_format.py: FIM format auto-detection (probe, score, rank, optional -judge tie-break, optional -apply)
   - runner.py: job building, async orchestration, samples.json read/write
 
 STYLE GUIDE:

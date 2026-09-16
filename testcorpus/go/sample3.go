@@ -1,37 +1,49 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"os"
-	"strings"
 )
 
-func sum(values []int) int {
-	total := 0
-	for _, v := range values {
-		total += v
-	}
-	return total
+type stack struct {
+	items []int
 }
 
-func filter(values []int, min int) []int {
-	out := []int{}
-	for _, v := range values {
-		if v > min {
-			out = append(out, v)
-		}
+func (s *stack) push(value int) {
+	s.items = append(s.items, value)
+}
+
+func (s *stack) pop() (int, error) {
+	if len(s.items) == 0 {
+		return 0, errors.New("pop from empty stack")
 	}
-	return out
+	last := len(s.items) - 1
+	value := s.items[last]
+	s.items = s.items[:last]
+	return value, nil
+}
+
+func (s *stack) peek() (int, error) {
+	if len(s.items) == 0 {
+		return 0, errors.New("peek on empty stack")
+	}
+	return s.items[len(s.items)-1], nil
 }
 
 func main() {
-	args := os.Args[1:]
-	name := "world"
-	if len(args) > 0 {
-		name = args[0]
+	s := &stack{}
+	for i := 1; i <= 5; i++ {
+		s.push(i * i)
 	}
-	fmt.Println("hello", name)
-	nums := []int{1, 2, 3, 4, 5, 6, 7, 8}
-	big := filter(nums, 4)
-	fmt.Println(sum(big))
+	for len(s.items) > 0 {
+		value, err := s.pop()
+		if err != nil {
+			fmt.Println("error:", err)
+			break
+		}
+		fmt.Println("popped", value)
+	}
+	if _, err := s.peek(); err != nil {
+		fmt.Println("empty:", err)
+	}
 }

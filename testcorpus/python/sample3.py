@@ -1,33 +1,40 @@
-import os
-import sys
+import re
+from collections import Counter
+
+WORD = re.compile(r"[a-z']+")
 
 
-def process_data(items, threshold):
-    results = []
-    total = 0
-    for item in items:
-        value = item.get("value", 0)
-        if value > threshold:
-            results.append(item)
-            total += value
-    return results, total
+def tokenize(text):
+    return WORD.findall(text.lower())
 
 
-def load_config(path):
-    if not os.path.exists(path):
-        raise FileNotFoundError(path)
-    with open(path) as handle:
-        return handle.read()
+def word_stats(text):
+    words = tokenize(text)
+    counts = Counter(words)
+    longest = max(words, key=len) if words else ""
+    return counts, longest
 
 
-def main(argv):
-    name = argv[1] if len(argv) > 1 else "world"
-    greeting = f"hello {name}"
-    print(greeting)
-    data = process_data([{"value": i} for i in range(10)], 4)
-    print(data)
-    return 0
+def top_words(counts, limit=3):
+    return [word for word, _ in counts.most_common(limit)]
+
+
+def merge_counts(first, second):
+    merged = Counter(first)
+    merged.update(second)
+    return merged
+
+
+def main():
+    sample = "the quick brown fox jumps over the lazy dog. The fox sleeps."
+    counts, longest = word_stats(sample)
+    extra = Counter(tokenize("the dog barks and the fox runs"))
+    total = merge_counts(counts, extra)
+    print("unique:", len(counts))
+    print("longest:", longest)
+    print("top:", top_words(counts))
+    print("merged top:", top_words(total, 5))
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    main()

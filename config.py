@@ -28,6 +28,10 @@ def load_config(path):
     return models
 
 
+def active_models(models):
+    return [model for model in models if model.is_active()]
+
+
 def validate_model(entry, index):
     if not isinstance(entry, dict):
         raise ConfigError(f"model #{index}: entry must be an object")
@@ -78,6 +82,12 @@ def validate_model(entry, index):
     device_type = entry.get("device_type")
     if device_type is not None and (not isinstance(device_type, str) or not device_type.strip()):
         errors.append("device_type: must be a non-empty string")
+    deactivated = entry.get("deactivated")
+    if deactivated is not None:
+        if not isinstance(deactivated, dict):
+            errors.append("deactivated: must be an object")
+        elif deactivated.get("reason") is not None and not isinstance(deactivated["reason"], str):
+            errors.append("deactivated: reason must be a string")
     pricing = entry.get("pricing")
     if pricing is not None:
         if not isinstance(pricing, dict) or not all(
@@ -109,6 +119,7 @@ def validate_model(entry, index):
         modes=modes,
         pricing=pricing,
         device_type=device_type.strip() if device_type else None,
+        deactivated=deactivated,
     )
 
 
@@ -130,7 +141,7 @@ def resolve_key(key, key_env):
 class ModelConfig:
     def __init__(self, name, model, endpoint, fim_endpoint, fim_protocol, fim_template,
                  api_key, max_context_size, max_tokens, temperature, timeout, headers,
-                 extra_body, modes, pricing, device_type):
+                 extra_body, modes, pricing, device_type, deactivated):
         self.name = name
         self.model = model
         self.endpoint = endpoint
@@ -147,6 +158,10 @@ class ModelConfig:
         self.modes = modes
         self.pricing = pricing
         self.device_type = device_type
+        self.deactivated = deactivated
 
     def has_fim(self):
         return self.fim_endpoint is not None
+
+    def is_active(self):
+        return self.deactivated is None

@@ -10,3 +10,6 @@ summary_judged.csv
 per_file.csv
 debug_*.csv
 debug_*.jsonl
+fim_format_results.jsonl
+fim_format_summary.csv
+*.bak

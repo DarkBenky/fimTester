@@ -34,6 +34,8 @@ def parse_args(argv):
     parser.add_argument("-max-tokens", "--max-tokens", type=int, default=None)
     parser.add_argument("-formats", "--formats", default=None)
     parser.add_argument("-models", "--models", default=None)
+    parser.add_argument("-remote-only", "--remote-only", action="store_true",
+                        help="skip models whose endpoint is local (localhost / 127.0.0.1)")
     parser.add_argument("-out-jsonl", "--out-jsonl", default="fim_format_results.jsonl")
     parser.add_argument("-out-csv", "--out-csv", default="fim_format_summary.csv")
     parser.add_argument("-judge", "--judge", action="store_true")
@@ -371,8 +373,13 @@ def main(argv=None):
     for model in all_models:
         if not model.is_active():
             print(f"deactivated, skipped: {model.name}")
+    if args.remote_only:
+        for model in models:
+            if model.is_local():
+                print(f"local, skipped: {model.name}")
+        models = [model for model in models if not model.is_local()]
     if not models:
-        print("no active models to probe", file=sys.stderr)
+        print("no models to probe", file=sys.stderr)
         return 2
     languages = split_csv(args.languages)
     for model in models:

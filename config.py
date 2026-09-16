@@ -1,9 +1,11 @@
 import json
 import os
 import re
+from urllib.parse import urlparse
 
 PROTOCOLS = ("deepseek_fim", "openai_completions", "llamacpp_infill")
 ENV_VAR = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 
 class ConfigError(Exception):
@@ -30,6 +32,12 @@ def load_config(path):
 
 def active_models(models):
     return [model for model in models if model.is_active()]
+
+
+def is_local_url(url):
+    if not url:
+        return False
+    return urlparse(url).hostname in LOCAL_HOSTS
 
 
 def validate_model(entry, index):
@@ -165,3 +173,6 @@ class ModelConfig:
 
     def is_active(self):
         return self.deactivated is None
+
+    def is_local(self):
+        return is_local_url(self.endpoint) or is_local_url(self.fim_endpoint)

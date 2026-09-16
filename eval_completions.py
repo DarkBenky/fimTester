@@ -30,6 +30,8 @@ def parse_args(argv):
     parser.add_argument("-no-stream", "--no-stream", action="store_true")
     parser.add_argument("-fresh", "--fresh", action="store_true",
                         help="overwrite results and summaries instead of appending to previous runs")
+    parser.add_argument("-remote-only", "--remote-only", action="store_true",
+                        help="skip models whose endpoint is local (localhost / 127.0.0.1)")
     return parser.parse_args(argv)
 
 
@@ -48,8 +50,13 @@ def main(argv=None):
     for model in all_models:
         if not model.is_active():
             print(f"deactivated, skipped: {model.name}")
+    if args.remote_only:
+        for model in models:
+            if model.is_local():
+                print(f"local, skipped: {model.name}")
+        models = [model for model in models if not model.is_local()]
     if not models:
-        print("no active models in config", file=sys.stderr)
+        print("no models to run", file=sys.stderr)
         return 2
     for model in models:
         if model.timeout is None:

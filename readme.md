@@ -16,7 +16,11 @@ model before picking winners; `-apply` patches config.json in place and skips an
 ## Run the benchmark
 ```bash
 python eval_completions.py -path ~/Desktop/gengin -samples 128 -config config.json -sampling random -workers 16 -seed 123
+python eval_completions.py -path ~/Desktop/gengin -samples 128 -config config.json -sampling random -workers 16 -seed 123 -remote-only # run benchmark only on API models
 ```
+
+Add `-remote-only` to skip every local model (localhost / 127.0.0.1) — nothing is sent to local
+servers, only the remote APIs are benchmarked.
 
 Rows are appended to `results.jsonl` as they finish, but `summary.csv` / `per_file.csv` are
 only written when the run ends. Killing the run (Ctrl-C) keeps every finished row — rebuild

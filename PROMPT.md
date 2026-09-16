@@ -14,13 +14,14 @@ CLI:
     -path testcorpus -languages c,go,python,javascript -samples-per-format 3
     -workers 4 -seed 42 -timeout 60 -max-tokens 192
     -formats starcoder,codellama,deepseek_tokens,qwen_openai_tags,native_suffix_param,llamacpp_infill
-    -models name1,name2
+    -models name1,name2 -remote-only
     -out-jsonl fim_format_results.jsonl -out-csv fim_format_summary.csv
     -judge -judge-config judge.config.json
     -apply
 
   - one shared hole set is probed with every model x format pair; rows stream to the output file as they finish
   - -max-tokens caps the probe completion length per model (useful on slow local servers)
+  - -remote-only skips models with a local endpoint (localhost / 127.0.0.1), so only remote APIs are probed
   - composite = 0.5 * token similarity + 0.3 * merged syntax + 0.2 * (0 when a template tag leaked into the completion)
   - fim_format_results.jsonl rows: model, format, protocol, file, language, lines, removed_text,
     completion_raw/norm, similarities, syntax flags, leaked, composite, status, error
@@ -39,11 +40,12 @@ CLI:
     -min-file-lines 30 -languages c,go,python,javascript
     -sampling balanced|random
     -write-samples samples.json -samples-file samples.json -no-stream
-    -fresh
+    -fresh -remote-only
 
   - every flag also works with two dashes (-path / --path)
   - defaults: seed 42, jsonl results.jsonl, csv summary.csv, per-file-csv per_file.csv, workers 4, timeout 60, cut mixed, span-lines 1 20, min-file-lines 30, languages = all four
   - results accumulate: a run appends its rows to the existing -jsonl and the summaries are recomputed over all rows from every previous run, so repeated runs average together; -fresh overwrites instead
+  - -remote-only skips every model whose endpoint is local (localhost / 127.0.0.1), for benchmarking only the remote APIs
 
 Core:
   - recursively collect source files (skip .git, node_modules, vendor, build, dist, target, hidden dirs)

@@ -2,6 +2,17 @@ TODO: Build a Python code-completion/FIM evaluation harness.
 
 Goal: measure how well a model fills a removed middle span of real code, and compare models on the exact same holes.
 
+## Needs to be implemented: FIM Format Auto-Detection
+
+Right now `fim_protocol`/`fim_template` in config.json have to be picked by hand per model. Add a
+`detect_fim_format.py` script that sends a small number of real FIM requests per model using
+several candidate prompt formats (StarCoder tags, CodeLlama tags, DeepSeek-Coder tokens, Qwen/
+OpenAI tags, native suffix-param protocol, llama.cpp infill), scores the completions, and reports
+(or applies) the best `fim_protocol`/`fim_template`/`fim_endpoint` per model.
+
+Full implementation spec (self-contained, written for a model with no prior context on this
+repo): [FIM_FORMAT_DETECTION.md](FIM_FORMAT_DETECTION.md)
+
 CLI:
   python eval_completions.py -path ./my-codebase -samples 100 -config ./config.json
     -seed 42 -jsonl results.jsonl -csv summary.csv -per-file-csv per_file.csv

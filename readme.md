@@ -42,6 +42,24 @@ in both `summary.csv` and `summary_judged.csv`.
 python judge.py -results results.jsonl -config judge.config.json -workers 16
 ```
 
+## Build the LoRA dataset (real + synthetic FIM samples)
+
+`synteticData/generate.py` mixes real holes (same machinery as `eval_completions.py`) 50/50 with
+synthetic samples from `deepseek/deepseek-v4-flash-0731:floor`, verified with tree-sitter syntax
+checks + the judge (`>= -judge-min` before a sample is kept). Real rows must reconstruct their
+source file exactly (`prefix + completion + suffix == file`).
+
+```bash
+python synteticData/generate.py -path ~/Desktop/gengin -n 200 -fresh   # first run
+python synteticData/generate.py -path ~/Desktop/gengin -n 100          # append a batch
+python synteticData/generate.py -h                                     # all flags
+```
+
+Outputs in `synteticData/data/`: `dataset.jsonl`, `rejected.jsonl` (reasons), `manifest.json`.
+Rows are your schema + `source` (real: `file`/lines; synthetic: `judge_notes`). Without `-fresh`
+runs append (duplicates skipped). The judge is slow (thinking model) — `-judge-workers N` or
+`-no-judge` for speed; rejected slots are refilled up to `-max-tries`.
+
 ## CPU model servers
 
 ```bash

@@ -258,5 +258,25 @@ class Provider:
         )
         return response.choices[0].message.content or ""
 
+    async def complete(self, messages, temperature=None, max_tokens=None):
+        kwargs = dict(
+            model=self.cfg.model,
+            messages=messages,
+            max_tokens=max_tokens or self.cfg.max_tokens,
+            temperature=self.cfg.temperature if temperature is None else temperature,
+        )
+        extra = self._extra_body(True)
+        if extra:
+            kwargs["extra_body"] = extra
+        response, attempts = await self._with_retries(
+            lambda: self.client.chat.completions.create(**kwargs)
+        )
+        result = self._empty_result()
+        result["text"] = response.choices[0].message.content or ""
+        self._tokens(result, response.usage, result["text"])
+        result["ttft_ms"] = None
+        result["attempts"] = attempts
+        return result
+
     async def close(self):
         await self.client.close()

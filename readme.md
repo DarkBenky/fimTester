@@ -45,9 +45,14 @@ python judge.py -results results.jsonl -config judge.config.json -workers 16
 ## Build the LoRA dataset (real + synthetic FIM samples)
 
 `synteticData/generate.py` mixes real holes (same machinery as `eval_completions.py`) 50/50 with
-synthetic samples from `deepseek/deepseek-v4-flash-0731:floor`, verified with tree-sitter syntax
-checks + the judge (`>= -judge-min` before a sample is kept). Real rows must reconstruct their
-source file exactly (`prefix + completion + suffix == file`).
+synthetic samples from `deepseek/deepseek-v4-flash-0731:floor`. In the default `file` mode the model
+writes a whole file and the hole is cut locally with tree-sitter (`-synthetic-mode triple` makes the
+model author prefix/suffix/completion directly instead). Every synthetic sample is compiled and
+executed with the standard toolchain (C: `gcc` + ASan/UBSan, Python, JavaScript via `node`, Go) —
+compile errors, crashes, leaks, and non-zero exits are rejected, and the toolchain's message is fed
+back into the next attempt; `exec_verified: true` marks rows that passed. Disable with
+`-no-verify-exec`. Samples also pass the judge (`>= -judge-min`); real rows must reconstruct their
+source file exactly.
 
 ```bash
 python synteticData/generate.py -path ~/Desktop/gengin -n 200 -fresh   # first run
@@ -58,7 +63,11 @@ python synteticData/generate.py -h                                     # all fla
 Outputs in `synteticData/data/`: `dataset.jsonl`, `rejected.jsonl` (reasons), `manifest.json`.
 Rows are your schema + `source` (real: `file`/lines; synthetic: `judge_notes`). Without `-fresh`
 runs append (duplicates skipped). The judge is slow (thinking model) — `-judge-workers N` or
-`-no-judge` for speed; rejected slots are refilled up to `-max-tries`.
+`-no-judge` for speed; rejected slots are refilled up to `-max-tries`. Without `-seed` a fresh
+random seed is picked each run (printed at start and stored in the manifest; pass it back via
+`-seed N` to reproduce). Re-running with the same `-seed` keeps 0 new real samples once its holes
+are stored — just omit `-seed` (or change it) to mine more. A `<out>.lock` (e.g.
+`dataset.jsonl.lock`) refuses a second concurrent run against the same `-out`.
 
 ## CPU model servers
 
@@ -69,3 +78,4 @@ bash serve_cpu.sh status            # pid / health / rss per model
 bash serve_cpu.sh ram               # total ram of all running servers
 bash serve_cpu.sh stop              # stop all
 ```
+

@@ -4,7 +4,10 @@ import hashlib
 import json
 import os
 import random
+import re
+import shutil
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 
@@ -15,11 +18,11 @@ if ROOT not in sys.path:
 from config import ConfigError, load_config
 from files import read_source
 from judge import parse_score
-from metrics import check_syntax, strip_fences
+from metrics import check_syntax, strip_fences, syntax_valid
 from providers import Provider, ProviderError
 from report import read_jsonl
 from runner import build_holes
-from spans import is_meaningful
+from spans import is_meaningful, parse_file
 
 DATA_DIR = os.path.join(ROOT, "synteticData", "data")
 
@@ -74,6 +77,34 @@ GEN_TEMPLATE = (
     "- prefix under 60 lines, suffix under 20 lines, completion under 30 lines\n"
     "- never repeat or redefine code that already appears in the prefix or suffix\n"
     "- cut only at line boundaries, never inside a line; no stray or missing tokens\n"
+    "- resource-clean and self-contained: free everything allocated, no leaks, crashes, or undefined behavior; when practical add a main() that exercises the code and exits 0 without needing arguments\n"
+    "- do not mix syntax from other languages into {language}: the file is compiled and run with the standard toolchain and anything invalid fails\n"
+    "- domain and task_type in short snake_case (systems, memory_management); concepts: 2-5 short tags\n"
+)
+
+GEN_FILE_SYSTEM = (
+    "You write realistic, complete source files for a fill-in-the-middle training corpus. "
+    "The file is machine-checked: it must parse as valid code or it is rejected. "
+    "Reply with ONLY one JSON object."
+)
+
+GEN_FILE_TEMPLATE = (
+    "Write one complete {language} source file. Target difficulty: {difficulty}/5. "
+    "Domain hint: {domain}.\n\n"
+    "Return ONLY this JSON object:\n"
+    "{{\"language\": \"{language}\", \"domain\": \"...\", \"difficulty\": {difficulty}, "
+    "\"task_type\": \"...\", \"concepts\": [\"...\"], "
+    "\"focus_function\": \"<name of the trickiest function>\", "
+    "\"code\": \"<the whole file, newlines escaped>\"}}\n\n"
+    "Rules:\n"
+    "- the file must parse as one complete, self-contained {language} unit that defines everything it uses\n"
+    "- hard ({difficulty}/5): define helpers or constants far above and make the focus function rely "
+    "on them, so working on it requires reading the whole file; add error handling where realistic\n"
+    "- 40-120 lines; realistic idiomatic {language}; no TODO/FIXME/placeholders; no markdown fences\n"
+    "- resource-clean and self-contained: free everything allocated, no leaks, crashes, or undefined behavior; when practical add a main() that exercises the code and exits 0 without needing arguments\n"
+    "- do not mix syntax from other languages into {language}: the file is compiled and run with the standard toolchain and anything invalid fails\n"
+    "- no meta commentary anywhere: never mention AI, prompts, JSON, datasets, or training\n"
+    "- focus_function must be a function actually defined in the file\n"
     "- domain and task_type in short snake_case (systems, memory_management); concepts: 2-5 short tags\n"
 )
 
@@ -102,6 +133,8 @@ CLASSIFY_TEXT = 1200
 MIN_COMPLETION_CHARS = 20
 MAX_COMPLETION_CHARS = 8000
 CLASSIFY_MAX_TOKENS = 400
+VERIFY_TIMEOUT = 10
+VERIFY_COMPILE_TIMEOUT = 60
 
 REASON_HINTS = {
     "suffix too short": ("the suffix was empty or too short - it must contain at least 3 complete "
@@ -116,7 +149,27 @@ REASON_HINTS = {
     "sample too large": "keep the whole sample under the size budget",
     "completion duplicates suffix": "the completion must not repeat code already in the suffix",
     "completion duplicates prefix": "the completion must not repeat code already in the prefix",
+    "code too short": "the file must be 40-120 lines",
+    "file too short": "the file must be 40-120 lines",
+    "file does not parse": "the code must parse as one complete valid file",
+    "no usable hole": "include at least one complete function with real logic (several statements)",
+    "compile failed": "the file must compile without errors",
+    "sanitizer error": "the program must run without memory errors, leaks, or undefined behavior (it is executed under AddressSanitizer/UBSan)",
+    "runtime error": "the file must run without unhandled exceptions or errors",
+    "run crashed": "the program must not crash",
+    "run timed out": "the program must finish within a few seconds without waiting for input",
 }
+
+
+def hint_for(problem):
+    if problem in REASON_HINTS:
+        return REASON_HINTS[problem]
+    head, sep, rest = problem.partition(":")
+    if sep and head in ("compile failed", "runtime error", "sanitizer error"):
+        return REASON_HINTS[head] + " (" + rest.strip() + ")"
+    if problem.startswith("run exit"):
+        return "the program's main must run to completion and exit with status 0"
+    return problem
 
 
 def parse_args(argv):
@@ -125,12 +178,19 @@ def parse_args(argv):
     parser.add_argument("-n", "--samples", type=int, default=200, help="total samples to write this run")
     parser.add_argument("-ratio", "--ratio", type=float, default=0.5, help="share of real samples (0..1)")
     parser.add_argument("-languages", "--languages", default="c,go,python,javascript")
-    parser.add_argument("-seed", "--seed", type=int, default=854)
+    parser.add_argument("-seed", "--seed", type=int, default=None,
+                        help="random seed for hole mining and sampling; a fresh random seed is picked per run when omitted")
     parser.add_argument("-config", "--config", default=os.path.join(ROOT, "config.json"))
     parser.add_argument("-generator", "--generator", default="deepseek/deepseek-v4-flash-0731:floor")
     parser.add_argument("-temperature", "--temperature", type=float, default=0.8)
     parser.add_argument("-max-tokens", "--max-tokens", type=int, default=6000)
     parser.add_argument("-difficulty", "--difficulty", default="4,5", help="comma list of target difficulties 1-5")
+    parser.add_argument("-synthetic-mode", "--synthetic-mode", choices=["file", "triple"], default="file",
+                        help="file: the model writes a whole file and the hole is cut locally; "
+                             "triple: the model writes prefix/suffix/completion directly")
+    parser.add_argument("-no-verify-exec", "--no-verify-exec", action="store_true",
+                        help="skip compiling/running synthetic samples (C: gcc+ASan/UBSan, Python: py_compile+run, "
+                             "JavaScript: node --check+run, Go: go build+run when the toolchains exist)")
     parser.add_argument("-gen-workers", "--gen-workers", type=int, default=8)
     parser.add_argument("-judge-workers", "--judge-workers", type=int, default=8)
     parser.add_argument("-judge-config", "--judge-config", default=os.path.join(ROOT, "judge.config.json"))
@@ -265,6 +325,20 @@ def generate_messages(language, difficulty, domain, hint=None):
     ]
 
 
+def generate_file_messages(language, difficulty, domain, hint=None):
+    user = (GEN_FILE_TEMPLATE
+            .replace("{language}", language)
+            .replace("{difficulty}", str(difficulty))
+            .replace("{domain}", domain))
+    if hint:
+        user += (f"\n\nYour previous attempt was rejected: {hint}. "
+                 "Fix exactly that problem and return the corrected JSON object.")
+    return [
+        {"role": "system", "content": GEN_FILE_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
 def judge_messages(sample):
     prefix = sample["prefix"][-JUDGE_TEXT:]
     middle = sample["completion"][:JUDGE_TEXT]
@@ -392,6 +466,128 @@ def build_candidate(data, languages, max_sample_chars, expected_language=None):
     }, None
 
 
+FUNCTION_TYPES = {
+    "python": {"function_definition"},
+    "javascript": {"function_declaration", "method_definition", "arrow_function", "function_expression"},
+    "go": {"function_declaration", "method_declaration"},
+    "c": {"function_definition"},
+}
+
+
+def node_name(node, language):
+    name_node = node.child_by_field_name("name")
+    if name_node is None and language == "c":
+        name_node = node.child_by_field_name("declarator")
+        if name_node is None:
+            return None
+        return name_node.text.decode("utf-8", "ignore").split("(")[0].strip().lstrip("*")
+    if name_node is None:
+        return None
+    return name_node.text.decode("utf-8", "ignore")
+
+
+def find_function_node(root, language, name):
+    if not name:
+        return None
+    wanted = FUNCTION_TYPES.get(language, set())
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.type in wanted and node_name(node, language) == name:
+            return node
+        stack.extend(node.children)
+    return None
+
+
+def line_cut(lines, start, end, hole_type):
+    prefix = "\n".join(lines[:start]) + "\n"
+    completion = "\n".join(lines[start:end]) + "\n"
+    suffix = "\n".join(lines[end:])
+    return prefix, suffix, completion, hole_type
+
+
+def cut_file(rng, language, code, focus):
+    lines = code.split("\n")
+    n = len(lines)
+    if n < 10:
+        return None
+    node = find_function_node(parse_file(language, code).root_node, language, focus)
+    if node is not None:
+        start = node.start_point[0]
+        end = node.end_point[0] + 1
+        if 3 <= start and end <= n - 3 and end > start and rng.random() < 0.5:
+            return line_cut(lines, start, end, "block")
+    lo, hi = 3, n - 4
+    if node is not None:
+        inner_lo = node.start_point[0] + 1
+        inner_hi = node.end_point[0]
+        if inner_hi - inner_lo >= 3:
+            lo = max(lo, inner_lo)
+            hi = min(hi, inner_hi)
+    if hi - lo < 3:
+        lo, hi = 3, n - 4
+    if hi - lo < 3:
+        return None
+    start = rng.randint(lo, hi - 3)
+    end = min(start + rng.randint(3, 12), hi)
+    return line_cut(lines, start, end, "lines")
+
+
+async def candidate_from_file(data, args, rng, expected_language):
+    language = str(data.get("language", "")).lower().strip() or expected_language or ""
+    if language not in args.languages:
+        return None, f"language not allowed: {language or '?'}"
+    code = strip_fences(clean_text(text_field(data.get("code"))))
+    if len(code.strip()) < 200:
+        return None, "code too short"
+    if len(code) > args.max_sample_chars:
+        return None, "sample too large"
+    if len(code.split("\n")) < 25:
+        return None, "file too short"
+    exec_verified = None
+    if args.no_verify_exec:
+        if not syntax_valid(language, code):
+            return None, "file does not parse"
+    else:
+        ok, detail = await verify_exec(language, code)
+        if ok is False:
+            return None, detail
+        if ok is True:
+            exec_verified = True
+        elif not syntax_valid(language, code):
+            return None, "file does not parse"
+    focus = str(data.get("focus_function") or "").strip()
+    chosen = None
+    for _ in range(8):
+        cut = cut_file(rng, language, code, focus)
+        if cut is None:
+            break
+        prefix, suffix, completion, hole_type = cut
+        if not is_meaningful(completion, language):
+            continue
+        if len(completion.strip()) < MIN_COMPLETION_CHARS or len(completion.strip()) > MAX_COMPLETION_CHARS:
+            continue
+        if prefix + completion + suffix != code:
+            continue
+        chosen = (prefix, suffix, completion, hole_type)
+        break
+    if chosen is None:
+        return None, "no usable hole"
+    prefix, suffix, completion, hole_type = chosen
+    return {
+        "language": language,
+        "domain": sanitize_label(data.get("domain") or "") or "unknown",
+        "difficulty": clamp_difficulty(data.get("difficulty"), 4),
+        "task_type": sanitize_label(data.get("task_type") or "") or "unknown",
+        "hole_type": hole_type,
+        "prefix": prefix,
+        "suffix": suffix,
+        "completion": completion,
+        "concepts": concepts_field(data.get("concepts")),
+        "exec_verified": exec_verified,
+    }, None
+
+
 def real_sample(hole, language, prefix, suffix, completion):
     return {
         "language": language,
@@ -414,7 +610,7 @@ def real_sample(hole, language, prefix, suffix, completion):
     }
 
 
-def synthetic_sample(candidate, args, generator_name, score, notes):
+def synthetic_sample(candidate, args, generator_name, score, notes, exec_verified=None):
     return {
         "language": candidate["language"],
         "domain": candidate["domain"],
@@ -431,6 +627,7 @@ def synthetic_sample(candidate, args, generator_name, score, notes):
         "verified": True,
         "source": "synthetic",
         "judge_notes": notes,
+        "exec_verified": exec_verified,
     }
 
 
@@ -560,12 +757,134 @@ async def classify_real(provider, samples, args, stats):
     await asyncio.gather(*[asyncio.create_task(classify_one(sample)) for sample in samples])
 
 
+C_MARKERS = (("AddressSanitizer", "sanitizer error"), ("LeakSanitizer", "sanitizer error"),
+             ("runtime error:", "sanitizer error"))
+PYTHON_MARKERS = (("Traceback (most recent call last)", "runtime error"),)
+
+
+def system_env():
+    env = dict(os.environ)
+    env["PATH"] = "/usr/bin:/bin:/usr/local/bin:" + env.get("PATH", "")
+    return env
+
+
+async def compile_check(command, env):
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, env=env)
+    except FileNotFoundError:
+        return None
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=VERIFY_COMPILE_TIMEOUT)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return "timed out"
+    if proc.returncode != 0:
+        lines = [line.strip() for line in stderr.decode("utf-8", "ignore").split("\n") if line.strip()]
+        located = [line for line in lines if re.search(r":\d+", line)]
+        return (located[0] if located else (lines[0] if lines else "unknown error"))[:200]
+    return True
+
+
+async def run_invocations(command, cwd, env, markers):
+    last_exit = None
+    for extra in ([], ["1+2"], ["test"], ["."]):
+        proc = await asyncio.create_subprocess_exec(
+            *command, *extra, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, cwd=cwd, env=env)
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=VERIFY_TIMEOUT)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return False, "run timed out"
+        text = stderr.decode("utf-8", "ignore")
+        tail = [line.strip() for line in text.split("\n") if line.strip()]
+        extra = tail[-1][:140] if tail else ""
+        for needle, detail in markers:
+            if needle in text:
+                return (False, f"{detail}: {extra}") if extra else (False, detail)
+        if proc.returncode is not None and proc.returncode < 0:
+            return False, "run crashed"
+        if proc.returncode == 0:
+            return True, None
+        last_exit = proc.returncode
+    return False, f"run exit {last_exit}"
+
+
+async def verify_exec(language, code):
+    with tempfile.TemporaryDirectory(prefix="fimverify_") as tmp:
+        env = system_env()
+        if language == "c":
+            source = os.path.join(tmp, "sample.c")
+            binary = os.path.join(tmp, "sample")
+            with open(source, "w", encoding="utf-8") as f:
+                f.write(code)
+            has_main = find_function_node(parse_file("c", code).root_node, "c", "main") is not None
+            base = ["gcc", "-std=gnu11", "-fsanitize=address,undefined", "-g"]
+            if has_main:
+                ok = await compile_check(base + [source, "-o", binary], env)
+            else:
+                ok = await compile_check(base + ["-c", source, "-o", binary + ".o"], env)
+            if ok is None:
+                return None, None
+            if ok is not True:
+                return False, f"compile failed: {ok}"
+            if not has_main:
+                return True, None
+            return await run_invocations([binary], tmp, env, C_MARKERS)
+        if language == "python":
+            source = os.path.join(tmp, "sample.py")
+            with open(source, "w", encoding="utf-8") as f:
+                f.write(code)
+            ok = await compile_check([sys.executable, "-m", "py_compile", source], env)
+            if ok is None:
+                return None, None
+            if ok is not True:
+                return False, f"compile failed: {ok}"
+            return await run_invocations([sys.executable, source], tmp, env, PYTHON_MARKERS)
+        if language == "javascript":
+            node = shutil.which("node", path=env["PATH"])
+            if node is None:
+                return None, None
+            source = os.path.join(tmp, "sample.js")
+            with open(source, "w", encoding="utf-8") as f:
+                f.write(code)
+            ok = await compile_check([node, "--check", source], env)
+            if ok is None:
+                return None, None
+            if ok is not True:
+                return False, f"compile failed: {ok}"
+            return await run_invocations([node, source], tmp, env, [])
+        if language == "go":
+            go = shutil.which("go", path=env["PATH"])
+            if go is None:
+                return None, None
+            source = os.path.join(tmp, "sample.go")
+            binary = os.path.join(tmp, "sample")
+            with open(source, "w", encoding="utf-8") as f:
+                f.write(code)
+            go_env = dict(env)
+            go_env["GO111MODULE"] = "off"
+            go_env["GOCACHE"] = os.path.join(tmp, "gocache")
+            ok = await compile_check([go, "build", "-o", binary, source], go_env)
+            if ok is None:
+                return None, None
+            if ok is not True:
+                return False, f"compile failed: {ok}"
+            return await run_invocations([binary], tmp, go_env, [])
+        return None, None
+
+
 async def produce_synthetic(provider, judge_provider, args, rng, language, difficulties,
                             seen, rejects, stats, gen_sem, judge_sem, out_log):
     last_problem = None
     for _ in range(args.gen_retries + 1):
         difficulty = rng.choice(difficulties)
-        messages = generate_messages(language, difficulty, rng.choice(DOMAINS), last_problem)
+        domain = rng.choice(DOMAINS)
+        if args.synthetic_mode == "file":
+            messages = generate_file_messages(language, difficulty, domain, last_problem)
+        else:
+            messages = generate_messages(language, difficulty, domain, last_problem)
         async with gen_sem:
             try:
                 result = await provider.complete(
@@ -575,6 +894,8 @@ async def produce_synthetic(provider, judge_provider, args, rng, language, diffi
                 record_reject(rejects, "synthetic", f"generator {e.kind}",
                               language=language, detail=e.message[:300])
                 bump(stats["by_reason"], f"generator {e.kind}")
+                if e.kind in ("PermissionDeniedError", "AuthenticationError"):
+                    stats["auth_failures"] += 1
                 continue
         stats["gen_calls"] += 1
         call = stats["gen_calls"]
@@ -587,13 +908,17 @@ async def produce_synthetic(provider, judge_provider, args, rng, language, diffi
             print(f"[gen {call}] {language} reject: unparsed json", flush=True)
             last_problem = "the reply was not parseable JSON"
             continue
-        candidate, problem = build_candidate(data, args.languages, args.max_sample_chars, language)
+        if args.synthetic_mode == "file":
+            candidate, problem = await candidate_from_file(data, args, rng, language)
+        else:
+            candidate, problem = build_candidate(data, args.languages, args.max_sample_chars, language)
         if candidate is None:
             record_reject(rejects, "synthetic", problem, language=language, sample=data)
             bump(stats["by_reason"], problem)
             print(f"[gen {call}] {language} reject: {problem}", flush=True)
-            last_problem = REASON_HINTS.get(problem, problem)
+            last_problem = hint_for(problem)
             continue
+        exec_verified = candidate.pop("exec_verified", None)
         if candidate["language"] != language:
             record_reject(rejects, "synthetic", "language mismatch",
                           language=language, detail=candidate["language"], sample=candidate)
@@ -606,6 +931,17 @@ async def produce_synthetic(provider, judge_provider, args, rng, language, diffi
             stats["duplicates"] += 1
             print(f"[gen {call}] {language} skip: duplicate", flush=True)
             continue
+        if not args.no_verify_exec and args.synthetic_mode == "triple":
+            code = candidate["prefix"] + candidate["completion"] + candidate["suffix"]
+            ok, detail = await verify_exec(candidate["language"], code)
+            if ok is False:
+                record_reject(rejects, "synthetic", detail, language=language, sample=candidate)
+                bump(stats["by_reason"], detail)
+                print(f"[gen {call}] {language} reject: {detail}", flush=True)
+                last_problem = hint_for(detail)
+                continue
+            if ok is True:
+                exec_verified = True
         score = None
         notes = None
         if judge_provider is not None:
@@ -617,6 +953,8 @@ async def produce_synthetic(provider, judge_provider, args, rng, language, diffi
                     record_reject(rejects, "synthetic", f"judge {e.kind}", language=language, sample=candidate)
                     bump(stats["by_reason"], f"judge {e.kind}")
                     print(f"[gen {call}] {language} reject: judge {e.kind}", flush=True)
+                    if e.kind in ("PermissionDeniedError", "AuthenticationError"):
+                        stats["auth_failures"] += 1
                     continue
             stats["judged"] += 1
             score, notes = parse_score(answer)
@@ -637,7 +975,7 @@ async def produce_synthetic(provider, judge_provider, args, rng, language, diffi
                 continue
         seen.add(digest)
         stats["kept_synth"] += 1
-        sample = synthetic_sample(candidate, args, provider.cfg.name, score, notes)
+        sample = synthetic_sample(candidate, args, provider.cfg.name, score, notes, exec_verified)
         out_log.append(sample)
         print(f"[gen {call}] {language} KEPT judge={score} (kept {stats['kept_synth']}/{stats['synth_target']})", flush=True)
         return sample
@@ -658,13 +996,15 @@ async def run_synthetic(args, provider, judge_provider, rng, languages, total, s
                    for language in languages if quotas[language] > counts[language]}
         if not missing:
             break
-        tasks = []
+        specs = []
         for language, needed in missing.items():
             for _ in range(needed):
-                tasks.append(asyncio.create_task(
-                    produce_synthetic(provider, judge_provider, args, rng, language, difficulties,
-                                      seen, rejects, stats, gen_sem, judge_sem, out_log)
-                ))
+                specs.append(language)
+        rng.shuffle(specs)
+        tasks = [asyncio.create_task(
+            produce_synthetic(provider, judge_provider, args, rng, language, difficulties,
+                              seen, rejects, stats, gen_sem, judge_sem, out_log)
+        ) for language in specs]
         stats["waves"] = wave + 1
         for coro in asyncio.as_completed(tasks):
             sample = await coro
@@ -672,6 +1012,10 @@ async def run_synthetic(args, provider, judge_provider, rng, languages, total, s
                 kept.append(sample)
                 counts[sample["language"]] += 1
         print(f"synthetic wave {wave + 1}: kept {len(kept)}/{total}, generation calls {stats['gen_calls']} ({time.perf_counter() - started:.0f}s)", flush=True)
+        if stats["auth_failures"] >= 10:
+            print(f"FATAL: API keys rejected {stats['auth_failures']} requests (permission/auth, generator or judge) - "
+                  "fix config.json / judge.config.json, then rerun (samples kept so far are saved)", flush=True)
+            break
     return kept
 
 
@@ -733,6 +1077,7 @@ def build_manifest(args, generator, judge_config, n_real, n_synth, real, synthet
         "seed": args.seed,
         "path": args.path,
         "config": args.config,
+        "verify_exec": not args.no_verify_exec,
         "generator": {
             "name": generator.name,
             "model": generator.model,
@@ -762,10 +1107,39 @@ def build_manifest(args, generator, judge_config, n_real, n_synth, real, synthet
     }
 
 
+def _is_generate_process(pid):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            return b"generate.py" in fh.read()
+    except OSError:
+        return False
+
+
+def acquire_run_lock(out_path):
+    lock_path = out_path + ".lock"
+    if os.path.exists(lock_path):
+        pid = 0
+        try:
+            with open(lock_path, encoding="utf-8") as fh:
+                pid = int(fh.read().strip() or "0")
+        except (OSError, ValueError):
+            pid = 0
+        if pid > 1 and _is_generate_process(pid):
+            print(f"another generate.py (pid {pid}) is already writing {out_path}; "
+                  f"stop it first or delete {lock_path} if it is stale", file=sys.stderr)
+            return None
+    with open(lock_path, "w", encoding="utf-8") as fh:
+        fh.write(str(os.getpid()))
+    return lock_path
+
+
 def main(argv=None):
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)
     args = parse_args(argv)
+    if args.seed is None:
+        args.seed = random.randrange(1, 2**31 - 1)
+        print(f"seed: {args.seed} (random; pass -seed {args.seed} to reproduce this run)", flush=True)
     languages = [l.strip().lower() for l in args.languages.split(",") if l.strip()]
     if not languages:
         print("no languages given", file=sys.stderr)
@@ -828,6 +1202,7 @@ def main(argv=None):
         "gen_calls": 0,
         "judged": 0,
         "judge_rejected": 0,
+        "auth_failures": 0,
         "kept_synth": 0,
         "synth_target": 0,
         "duplicates": 0,
@@ -836,6 +1211,9 @@ def main(argv=None):
         "scores": [],
         "by_reason": {},
     }
+    lock_path = acquire_run_lock(args.out)
+    if lock_path is None:
+        return 3
     seen = set()
     rejects = JsonlList(args.rejects, fresh=True)
     existing = []
@@ -849,8 +1227,14 @@ def main(argv=None):
         print(f"appending to {args.out} ({len(existing)} rows, -fresh to start over)")
 
     out_log = JsonlList(args.out, fresh=args.fresh)
+    dupes_before = stats["duplicates"]
     real = build_real(args, languages, n_real, seen, rejects, stats, out_log)
-    print(f"real kept: {len(real)}/{n_real}", flush=True)
+    real_dupes = stats["duplicates"] - dupes_before
+    note = f" (skipped {real_dupes} duplicates already in the dataset)" if real_dupes else ""
+    print(f"real kept: {len(real)}/{n_real}{note}", flush=True)
+    if not real and real_dupes:
+        print(f"  -> seed {args.seed} finds no new real holes in {args.path}; "
+              f"re-run without -seed (or with a different -seed) to mine new ones", flush=True)
 
     async def pipeline():
         provider = Provider(generator)
@@ -867,7 +1251,7 @@ def main(argv=None):
             if judge_provider is not None:
                 await judge_provider.close()
 
-    print(f"synthetic: generating {n_synth} with {generator.name}"
+    print(f"synthetic: generating {n_synth} with {generator.name} (mode {args.synthetic_mode})"
           + ("" if judge_config is None else f", judging with {judge_config.name} min {args.judge_min}"))
     synthetic = asyncio.run(pipeline())
 
@@ -887,6 +1271,10 @@ def main(argv=None):
     if stats["cost_usd"]:
         print(f"generator cost ~${stats['cost_usd']:.4f}")
     print(f"manifest -> {args.manifest}")
+    try:
+        os.remove(lock_path)
+    except OSError:
+        pass
     return 0
 
 

@@ -13,3 +13,8 @@ debug_*.jsonl
 fim_format_results.jsonl
 fim_format_summary.csv
 *.bak
+*.lock
+synteticData/data/manifest.json
+synteticData/data/dataset.jsonl
+synteticData/data/rejected.jsonl
+synteticData/data/fimEdit/captures.jsonl

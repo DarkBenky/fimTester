@@ -3,7 +3,7 @@ import os
 import re
 from urllib.parse import urlparse
 
-PROTOCOLS = ("deepseek_fim", "openai_completions", "llamacpp_infill")
+PROTOCOLS = ("deepseek_fim", "openai_completions", "llamacpp_infill", "chat_instruct")
 ENV_VAR = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 

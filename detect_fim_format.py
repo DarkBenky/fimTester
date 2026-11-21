@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+import time
 
 from config import ConfigError, active_models, load_config
 from fim_formats import FORMATS, LEAK_TOKENS, applicable_formats, format_names
@@ -89,6 +90,7 @@ def row_composite(row, token_sim, merged):
 
 async def probe_one(provider, model, fmt, hole):
     row = base_row(model, fmt, hole)
+    start = time.perf_counter()
     try:
         result = await provider.fim(hole.prefix, hole.suffix, False)
     except ProviderError as e:
@@ -99,6 +101,8 @@ async def probe_one(provider, model, fmt, hole):
         row["status"] = "error"
         row["error"] = f"unexpected {type(e).__name__}: {e}"
         return row
+    row["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
+    row["reasoning_chars"] = result.get("reasoning_chars")
     raw = result["text"]
     row["completion_raw"] = raw
     normalized = postprocess(raw, hole.language, hole.indent)
@@ -131,6 +135,12 @@ async def probe_all(models, formats_by_model, holes, workers, jsonl_path):
             cfg = copy.copy(model)
             cfg.fim_protocol = fmt["protocol"]
             cfg.fim_template = fmt["template"]
+            if fmt.get("max_tokens"):
+                cfg.max_tokens = fmt["max_tokens"]
+            if fmt.get("extra_body"):
+                merged = dict(model.extra_body or {})
+                merged.update(fmt["extra_body"])
+                cfg.extra_body = merged
             provider = Provider(cfg)
             device = device_sems.get(model.device_type)
 

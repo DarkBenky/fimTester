@@ -1,0 +1,2 @@
+model,mode,samples,ok,unsupported,errors,error_rate,exact_match,exact_match_norm,avg_similarity_char,avg_similarity_token,syntax_valid,avg_latency_ms,median_latency_ms,p95_latency_ms,avg_ttft_ms,total_prompt_tokens,total_completion_tokens,total_cost_usd,avg_judge_score
+local-nemotron-bolt-e4b,fim,32,32,0,0,0.0,0.03125,0.03125,0.5044400134675432,0.5505101508911264,0.46875,640.9583729997621,422.5891784990381,1079.7888619999867,96.43586596939713,10838,2194,,

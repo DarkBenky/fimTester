@@ -32,6 +32,8 @@ def parse_args(argv):
                         help="overwrite results and summaries instead of appending to previous runs")
     parser.add_argument("-remote-only", "--remote-only", action="store_true",
                         help="skip models whose endpoint is local (localhost / 127.0.0.1)")
+    parser.add_argument("-models", "--models", default=None,
+                        help="comma-separated model names to run (default: all active models)")
     return parser.parse_args(argv)
 
 
@@ -50,6 +52,14 @@ def main(argv=None):
     for model in all_models:
         if not model.is_active():
             print(f"deactivated, skipped: {model.name}")
+    selected_models = [name.strip() for name in (args.models or "").split(",") if name.strip()]
+    if selected_models:
+        unknown = [name for name in selected_models
+                   if name not in {model.name for model in all_models}]
+        if unknown:
+            print(f"unknown models: {', '.join(unknown)}", file=sys.stderr)
+            return 2
+        models = [model for model in models if model.name in selected_models]
     if args.remote_only:
         for model in models:
             if model.is_local():

@@ -1,0 +1,3 @@
+model,format,requests,avg_similarity_char,avg_similarity_token,syntax_valid_rate,leak_rate,composite_score
+local-nemotron-bolt-e4b,chat_sections,12,0.4103694146715444,0.4738755432043391,0.5,0.0,0.5702711049355028
+local-nemotron-bolt-e4b,chat_sections_think,12,0.4768043188673237,0.49477332781850686,0.5833333333333334,0.0,0.6223866639092535

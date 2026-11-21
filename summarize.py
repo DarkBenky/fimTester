@@ -42,7 +42,7 @@ def carry_over_scores(rows, judged_path):
     return reused
 
 
-def judge_unscored(rows, config_path, workers):
+def judge_unscored(rows, config_path, workers, on_progress=None, chunk=16):
     judges = load_config(config_path)
     if len(judges) != 1:
         raise ConfigError("judge config must contain exactly one model")
@@ -55,7 +55,13 @@ def judge_unscored(rows, config_path, workers):
     async def go():
         provider = Provider(judges[0])
         try:
-            return await judge_rows(targets, provider, workers)
+            done = 0
+            for start in range(0, len(targets), chunk):
+                batch = targets[start:start + chunk]
+                await judge_rows(batch, provider, workers)
+                done += len(batch)
+                if on_progress:
+                    on_progress(done, len(targets))
         finally:
             await provider.close()
 
@@ -79,8 +85,13 @@ def main(argv=None):
     if args.judge:
         judged_path = args.judged_jsonl or args.jsonl.replace(".jsonl", "_judged.jsonl")
         reused = carry_over_scores(rows, judged_path)
+
+        def save_progress(done, total):
+            write_jsonl(judged_path, rows)
+            print(f"[judge saved {done}/{total}] -> {judged_path}", flush=True)
+
         try:
-            judged = judge_unscored(rows, args.judge_config, args.workers)
+            judged = judge_unscored(rows, args.judge_config, args.workers, save_progress)
         except ConfigError as e:
             print(f"judge config error: {e}", file=sys.stderr)
             return 2

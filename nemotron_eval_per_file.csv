@@ -1,0 +1,13 @@
+model,mode,file,language,samples,exact_match,avg_similarity_char,syntax_valid,errors,cost_usd
+local-nemotron-bolt-e4b,fim,testcorpus/c/sample1.c,c,2,0.0,0.6985754985754986,0.5,0,
+local-nemotron-bolt-e4b,fim,testcorpus/c/sample2.c,c,3,0.0,0.4933692520174373,0.3333333333333333,0,
+local-nemotron-bolt-e4b,fim,testcorpus/c/sample3.c,c,3,0.0,0.4063791360119455,0.3333333333333333,0,
+local-nemotron-bolt-e4b,fim,testcorpus/go/sample1.go,go,2,0.0,0.7894770571648295,0.5,0,
+local-nemotron-bolt-e4b,fim,testcorpus/go/sample2.go,go,3,0.0,0.5700616087287201,0.0,0,
+local-nemotron-bolt-e4b,fim,testcorpus/go/sample3.go,go,3,0.3333333333333333,0.7606562266964952,0.6666666666666666,0,
+local-nemotron-bolt-e4b,fim,testcorpus/js/sample1.js,javascript,3,0.0,0.6769988801791714,1.0,0,
+local-nemotron-bolt-e4b,fim,testcorpus/js/sample2.js,javascript,2,0.0,0.2001820589208871,0.5,0,
+local-nemotron-bolt-e4b,fim,testcorpus/js/sample3.js,javascript,3,0.0,0.273323066845181,0.3333333333333333,0,
+local-nemotron-bolt-e4b,fim,testcorpus/python/sample1.py,python,3,0.0,0.2156069616637173,0.6666666666666666,0,
+local-nemotron-bolt-e4b,fim,testcorpus/python/sample2.py,python,2,0.0,0.2976008265095278,0.5,0,
+local-nemotron-bolt-e4b,fim,testcorpus/python/sample3.py,python,3,0.0,0.6604080507306314,0.3333333333333333,0,

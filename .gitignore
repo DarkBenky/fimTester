@@ -13,6 +13,7 @@ debug_*.jsonl
 fim_format_results.jsonl
 fim_format_summary.csv
 *.bak
+*.bak-*
 *.lock
 synteticData/data/manifest.json
 synteticData/data/dataset.jsonl

@@ -175,6 +175,8 @@ class Provider:
                 kwargs = dict(model=self.cfg.model, prompt=prefix, suffix=suffix,
                               max_tokens=self.cfg.max_tokens, temperature=self.cfg.temperature)
             path = "completions"
+        elif protocol == "chat_instruct":
+            return await self._chat_instruct(prefix, suffix, stream)
         elif protocol == "llamacpp_infill":
             return await self._llamacpp_infill(prefix, suffix)
         else:
@@ -197,6 +199,41 @@ class Provider:
         response, attempts = await self._with_retries(request)
         result = self._empty_result()
         result["text"] = response.choices[0].text or ""
+        self._tokens(result, response.usage, result["text"])
+        if result["completion_tokens"] is None:
+            result["completion_tokens"] = estimate_tokens(result["text"])
+        result["ttft_ms"] = None
+        result["attempts"] = attempts
+        return result
+
+    async def _chat_instruct(self, prefix, suffix, stream):
+        template = self.cfg.fim_template or "{prefix}<CURSOR>{suffix}"
+        user = template.replace("{prefix}", prefix).replace("{suffix}", suffix)
+        kwargs = dict(
+            model=self.cfg.model,
+            messages=[
+                {"role": "system", "content": CHAT_INSTRUCTION},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=self.cfg.max_tokens,
+            temperature=self.cfg.temperature,
+        )
+        extra = self._extra_body(False)
+        if extra:
+            kwargs["extra_body"] = extra
+
+        def request():
+            return self.client.chat.completions.create(**kwargs)
+
+        if stream:
+            kwargs["stream"] = True
+            kwargs["stream_options"] = {"include_usage": True}
+            return await self._stream(request)
+        response, attempts = await self._with_retries(request)
+        result = self._empty_result()
+        message = response.choices[0].message
+        result["text"] = message.content or ""
+        result["reasoning_chars"] = len(getattr(message, "reasoning_content", None) or "")
         self._tokens(result, response.usage, result["text"])
         if result["completion_tokens"] is None:
             result["completion_tokens"] = estimate_tokens(result["text"])

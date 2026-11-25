@@ -19,3 +19,8 @@ synteticData/data/manifest.json
 synteticData/data/dataset.jsonl
 synteticData/data/rejected.jsonl
 synteticData/data/fimEdit/captures.jsonl
+
+nemotron_ab*.jsonl
+nemotron_ab*.csv
+nemotron_5arm*.jsonl
+nemotron_5arm*.csv

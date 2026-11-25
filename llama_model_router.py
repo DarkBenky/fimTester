@@ -456,6 +456,13 @@ class Router:
         return not bool(json.loads(data).get("loaded"))
 
     def ensure_shared_and_big(self) -> None:
+        # ROUTER_NO_LOCAL: never start/park local units or /load Strata. Both the request
+        # path and the background warm-up land here, so this is the single choke point.
+        # TEMPORARY (2026-11-24): set by llama-qwen-auto-router.service.d/no-local.conf so a
+        # LoRA training run can own the 3090. REMOVE the drop-in once training finishes -
+        # with the flag set, /small/, /infill and local chat answer 502 by design.
+        if os.environ.get("ROUTER_NO_LOCAL"):
+            raise RouterError("local models are disabled (ROUTER_NO_LOCAL set); use /ds/...")
         if (self.mode == "shared" and self.active(SHARED_UNIT)
                 and self.active(BIG_UNIT) and not self.big_is_sleeping()):
             return
@@ -863,8 +870,13 @@ def main() -> None:
     # Listen immediately; settle the profile in the background so a slow model
     # start never keeps port 8013 (and /health) down. Requests that arrive
     # early run through ensure_shared_and_big() themselves.
-    threading.Thread(target=router.initial_setup, daemon=True).start()
-    threading.Thread(target=router.monitor, daemon=True).start()
+    # ROUTER_NO_LOCAL=1 keeps the cloud-only endpoints (/ds/...) serving without starting or
+    # stopping any local llama.cpp unit, so the router can run while training owns the GPUs.
+    # TEMPORARY (2026-11-24): enabled by llama-qwen-auto-router.service.d/no-local.conf.
+    # REMOVE that drop-in to get the normal 3090 fast profile / Strata switching back.
+    if not os.environ.get("ROUTER_NO_LOCAL"):
+        threading.Thread(target=router.initial_setup, daemon=True).start()
+        threading.Thread(target=router.monitor, daemon=True).start()
     server = ThreadingHTTPServer((BIND_HOST, LISTEN_PORT), Handler)
     server.daemon_threads = True
     print(f"small-model fast/companion switcher listening on {BIND_HOST}:{LISTEN_PORT} "

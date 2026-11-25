@@ -1,0 +1,34 @@
+#ifndef TEST_BLUR_H
+#define TEST_BLUR_H
+
+#include "../util/threadPool.h"
+#include "../math/scalar.h"
+#include "../math/transform.h"
+#include "../math/vector3.h"
+#include "../render/color/color.h"
+#include "../object/format.h"
+#include "../image/imgMethods.h"
+#include "../object/object.h"
+#include "../render/render.h"
+#include "../render/cpu/ray.h"
+#include "../util/saveImage.h"
+#include "timings.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+typedef struct {
+	Camera *camera;
+	int row;
+	uint32 *output;
+} BlurTask;
+
+void BlurScene(Camera *camera);
+
+void BlurRow(Camera *camera, int row);
+void BlurRowUoutput(Camera *camera, int row, uint32 *output);
+void BlurTaskFunction(void *arg);
+void BlurRowUoutputTaskFunction(void *arg);
+
+#endif
